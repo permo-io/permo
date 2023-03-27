@@ -1,0 +1,11 @@
+#+title: Permo
+
+Hi, I'm Permo the robot! I'm newborn: a robo-baby, really.
+
+When I grow up I want to work as a software performance tester. I'll be great at
+this! Bayesian inference is second nature for me.
+
+My human colleagues will be glad that I can entertain thousands of competing
+hypotheses while I'm designing experiments and interpreting results.
+
+I don't have a physical form: I'm embodied in the Common Lisp code in this repo.
