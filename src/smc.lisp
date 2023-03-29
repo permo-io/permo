@@ -17,22 +17,27 @@
 ;;;; DEFMODEL: Model definition DSL (WIP)
 
 (defmacro defmodel (name arglist &body log-likelihood)
-  (destructuring-bind (args params) (split-sequence '&param arglist)
-    (when (null args)   (error "DEFMODEL requires at least one argument."))
-    (when (null params) (error "DEFMODEL requires at least one parameter."))
+  (destructuring-bind (args paramspecs) (split-sequence '&param arglist)
+    #+nil (when (null args)       (error "DEFMODEL requires at least one argument."))
+    (when (null paramspecs) (error "DEFMODEL requires at least one parameter."))
+    (loop for (name min max) in paramspecs
+          unless (and (symbolp name) (typep min 'double-float) (typep max 'double-float))
+            do (error "Invalid parameter: ~a" (list name min max)))
     (flet ((name (suffix name)
              (make-symbol (concatenate 'string (string name) "." suffix))))
-      (let ((doc (if (stringp (first log-likelihood))
-                     (pop log-likelihood)
-                     ()))
-            #+nil (weights (make-symbol "WEIGHTS"))
-            (vector.names   (mapcar (compose #'make-symbol #'symbol-name) params))
-            (proposal.names (mapcar (curry #'name "P") params)))
-        `(defun ,name (&key n-particles observations (jitter-scales '(0.01 0.1 0.5)))
+      (let* ((doc (if (stringp (first log-likelihood))
+                      (pop log-likelihood)
+                      ()))
+             #+nil (weights (make-symbol "WEIGHTS"))
+             (params         (mapcar #'first paramspecs))
+             (ranges         (mapcar #'rest paramspecs))
+             (vector.names   (mapcar (compose #'make-symbol #'symbol-name) params))
+             (proposal.names (mapcar (curry #'name "P") params)))
+        `(defun ,name (&key n-particles observations tempering-steps (jitter-scales '(0.01d0 0.1d0 0.5d0)))
            ,@(ensure-list doc)
-           (let (,@(mapcar (lambda (name)
-                             `(,name (make-array (list n-particles) :element-type 'R)))
-                           vector.names))
+           (let (,@(loop for name in vector.names
+                         for (min max) in ranges
+                         collect `(,name (init-parameter-vector n-particles ,min ,max))))
              (labels ((log-likelihood (,@params ,@args)
                         ,@log-likelihood)
                       (particle-log-likelihood (i ,@args)
@@ -59,11 +64,23 @@
                       (add-noise (x stddev)
                         (+ x (* stddev (gaussian-random)))))
                #+debug (declare (inline (smc/likelihood-tempering)))
-               (smc/likelihood-tempering n-particles observations
-                                         :log-likelihood #'particle-log-likelihood
-                                         :respawn! #'respawn!
-                                         :jitter! #'jitter!
-                                         ))))))))
+               (values
+                (smc/likelihood-tempering n-particles observations
+                                          :log-likelihood #'particle-log-likelihood
+                                          :respawn! #'respawn!
+                                          :jitter! #'jitter!
+                                          :temp-step (/ 1d0 tempering-steps))
+                (dict ,@(loop for param in params
+                              for vector in vector.names
+                              collect (list 'quote param)
+                              collect vector)))
+                                         )))))))
+
+(defun init-parameter-vector (length min max)
+  (loop with vec = (make-array (list length) :element-type 'R)
+        for i below length
+        do (setf (aref vec i) (lerp (/ i length) min max))
+        finally (return vec)))
 
 (defun reorder! (indices &rest arrays)
   "Atomically overwrite ARRAY[a][i] with ARRAY[a][indices[i]]."
@@ -73,7 +90,19 @@
                  for p in indices
                  do (setf (aref a i) (aref original p)))))
 
-(defmodel line (x y &param m c σ)
+(defmodel pi-circle (&param (x -1d0 1d0) (y -1d0 1d0))
+  "Estimate Pi via marginal likelihood."
+  ;; XXX: This model starts with a reasonable estimate which then approaches
+  ;;      zero as the number of likelihood tempering steps increases.
+  ;;      Why?
+  (log (if (< (sqrt (+ (* x x) (* y y))) 1d0)
+           4d0
+           0.001d0)))
+
+(defmodel line (x y &param
+                  (m -10d0 10d0)
+                  (c -10d0 10d0)
+                  (σ 0.001d0 5d0))
   "Linear relationship between X and Y with Gaussian noise of constant scale:
     y = m*x + c + N(0,σ)
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
@@ -156,7 +185,6 @@
 
     (-> log-likelihood (double-float double-float double-float list) double-float)
     (defun log-likelihood (m c σ datum)
-      #+nil (format t "~&log-likelihood ~a ~a ~a ~a~%" m c σ datum)
       (destructuring-bind (x y) datum
         (values (if (plusp σ)
                     (gaussian-log-likelihood (+ (* m x) c) σ y)
@@ -216,10 +244,9 @@
         do (funcall resample!)
            (funcall rejuvenate!)))
 
-(defsubst smc/likelihood-tempering (n-particles observations
+(defun smc/likelihood-tempering (n-particles observations
                                     &key
                                       log-likelihood respawn! jitter!
-                                      (initial-temp 0.01d0)
                                       (temp-step 0.01d0))
   "Run a callback-driven Sequential Monte Carlo simulation using likelihood tempering.
 
@@ -233,30 +260,34 @@
        (METROPOLIS-ACCEPT? OLD-LOG-LIKELIHOOD-FN NEW-LOG-LIKELIHOOD-FN)
      which compares the likelihood ratios and returns true if the move is accepted."
   (local
-    (def temp initial-temp)
+    (def temp 0d0)
+    (def prev-temp temp)
     (def log-weights (make-array (list n-particles) :element-type 'double-float))
 
-    (defun tempered-log-likelihood (log-likelihood-fn)
+    (defun tempered-log-likelihood (log-likelihood-fn &optional (temp temp))
       "Return the log-likelihood tempered with the current temperature."
       (handler-case
-          (loop for o in observations
-                summing (funcall log-likelihood-fn o) into ll
+          (loop for o in (or observations (list '()))
+                summing (apply log-likelihood-fn o) into ll
                 finally (return (logexpt ll temp)))
-        #+nil (floating-point-overflow () sb-ext:double-float-negative-infinity)))
+        (floating-point-overflow () sb-ext:double-float-negative-infinity)))
     (defun log-mean-likelihood ()
       "Return the log mean likelihood of all particles."
       (log/ (logsumexp log-weights) (log n-particles)))
     (defun weight! ()
       "Calculate and set the weight of each particle."
       (loop for i below n-particles
-            do (setf (aref log-weights i)
-                     (tempered-log-likelihood (partial log-likelihood i))))
-      (format t "~&w = ~a~%" log-weights))
+            do (let (#+nil (old (aref log-weights i)))
+                 (setf (aref log-weights i)
+                       (lret ((r (log/ (tempered-log-likelihood (partial log-likelihood i))
+                                       (tempered-log-likelihood (partial log-likelihood i) prev-temp)))
+                             #+nil (format t "~&r = ~8f~%" r)))))))
     (defun resample! ()
       "Replace old particles by resampling them into new ones."
       (funcall respawn! (systematic-resample log-weights)))
     (defun step! ()
       "Advance the tempering schedule (unless finished.)"
+      (setf prev-temp temp)
       (and (< temp 1d0)
            (setf temp (min 1d0 (+ temp temp-step)))))
     (defun metropolis-accept? (old-log-likelihood new-log-likelihood)
@@ -273,9 +304,9 @@
 
 ;; Helpers for arithmetic in the log domain.
 ;; Used sparingly when it helps to clarify intent.
-(defsubst log/ (&rest numbers) (apply #'- numbers))
+(defun log/ (&rest numbers) (apply #'- numbers))
 ;;(defun log* (&rest numbers) (apply #'+ numbers))
-(defsubst logexpt (a b)
+(defun logexpt (a b)
   "Raise A (a log-domain number) to the power B (which is not log!)"
   (* a b))
 
@@ -283,9 +314,10 @@
 
 (-> systematic-resample (vector) list)
 (defun systematic-resample (log-weights)
-  (systematic-resample/normalized (loop with normalizer = (logsumexp log-weights)
-                                        for lw across log-weights
-                                        collect (exp (- lw normalizer)))))
+  (values
+   (systematic-resample/normalized (loop with normalizer = (logsumexp log-weights)
+                                         for lw across log-weights
+                                         collect (exp (- lw normalizer))))))
 
 (-> systematic-resample/normalized (list) list)
 (defun systematic-resample/normalized (weights)
@@ -314,11 +346,13 @@
            (/ (+ (* z z) (log (* pi 2))) 2)))
       most-negative-double-float))
 
-(-> logsumexp (R[]) R)
+(-> logsumexp (R*) R)
 (defun logsumexp (vec)
   ;; utility for numerically stable addition of log quantities e.g. for normalization
   ;; see e.g. https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
-  (loop with max = (reduce #'max vec)
-        for x across vec
-        summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc
-        finally (return (+ max (log acc)))))
+  (let ((max (reduce #'max vec)))
+    (if (sb-ext:float-infinity-p max)
+        sb-ext:double-float-negative-infinity
+        (loop for x across vec
+              summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc
+              finally (return (+ max (log acc)))))))
