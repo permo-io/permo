@@ -32,8 +32,13 @@
              (params         (mapcar #'first paramspecs))
              (ranges         (mapcar #'rest paramspecs))
              (vector.names   (mapcar (compose #'make-symbol #'symbol-name) params))
-             (proposal.names (mapcar (curry #'name "P") params)))
-        `(defun ,name (&key n-particles observations tempering-steps (jitter-scales '(0.01d0 0.1d0 0.5d0)))
+             (proposal.names (mapcar (curry #'name "P") params))
+             (param.scales   (loop for (start end) in ranges
+                                   ;; About three standard deviations between
+                                   ;; particles on each parameter dimension.
+                                   ;; Give them a chance to jitter to neighbors.
+                                   collect (/ (abs (- end start)) (length params) 3))))
+        `(defun ,name (observations &key (n-particles 100) (steps 100) (jitter-scales '(0.01d0 0.35d0 1d0)))
            ,@(ensure-list doc)
            (let (,@(loop for name in vector.names
                          for (min max) in ranges
@@ -47,7 +52,7 @@
                       (respawn! (parents)
                         (reorder! parents ,@vector.names))
                       (jitter! (metropolis-accept?)
-                        (loop for stddev in jitter-scales do
+                        (loop for jitter in jitter-scales do
                           (loop for i below n-particles
                                 ,@(loop for param in params
                                         for vector in vector.names
@@ -55,21 +60,20 @@
                                 for ll.old = (partial #'log-likelihood ,@params)
                                 ,@(loop for proposal.name in proposal.names
                                         for param in params
-                                        append `(for ,proposal.name = (add-noise ,param stddev)))
+                                        for scale in param.scales
+                                        append `(for ,proposal.name = (+ ,param (* (gaussian-random) jitter (/ ,scale (expt n-particles ,(/ 1 (length params))))))))
                                 for ll.new = (partial #'log-likelihood ,@proposal.names)
                                 when (funcall metropolis-accept? ll.old ll.new)
                                   do (setf ,@(loop for vector in vector.names
                                                    for proposal in proposal.names
-                                                   append `((aref ,vector i) ,proposal))))))
-                      (add-noise (x stddev)
-                        (+ x (* stddev (gaussian-random)))))
+                                                   append `((aref ,vector i) ,proposal)))))))
                #+debug (declare (inline (smc/likelihood-tempering)))
                (values
                 (smc/likelihood-tempering n-particles observations
                                           :log-likelihood #'particle-log-likelihood
                                           :respawn! #'respawn!
                                           :jitter! #'jitter!
-                                          :temp-step (/ 1d0 tempering-steps))
+                                          :temp-step (/ 1d0 steps))
                 (dict ,@(loop for param in params
                               for vector in vector.names
                               collect (list 'quote param)
@@ -90,6 +94,23 @@
                  for p in indices
                  do (setf (aref a i) (aref original p)))))
 
+(defmodel line (x y &param
+                  (m -10d0 10d0)
+                  (c -10d0 10d0)
+                  (σ #.double-float-epsilon 5d0))
+  "Linear relationship between X and Y with Gaussian noise of constant scale:
+     y ~ m*x + c + N(0,σ)
+   Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
+  (gaussian-log-likelihood (+ c (* m x)) σ y))
+
+(defmodel gaussian (x &param
+                      (μ -10d0 10d0)
+                      (σ #.double-float-epsilon 10d0))
+  "Gaussian distribution:
+     x ~ N(μ,σ)
+   Infers mean and standard deviation."
+  (gaussian-log-likelihood μ σ x))
+
 (defmodel pi-circle (&param (x -1d0 1d0) (y -1d0 1d0))
   "Estimate Pi via marginal likelihood."
   ;; XXX: This model starts with a reasonable estimate which then approaches
@@ -98,127 +119,6 @@
   (log (if (< (sqrt (+ (* x x) (* y y))) 1d0)
            4d0
            0.001d0)))
-
-(defmodel line (x y &param
-                  (m -10d0 10d0)
-                  (c -10d0 10d0)
-                  (σ 0.001d0 5d0))
-  "Linear relationship between X and Y with Gaussian noise of constant scale:
-    y = m*x + c + N(0,σ)
-   Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
-  (gaussian-log-likelihood (+ c (* m x)) σ y))
-
-
-;;;; Models written by hand
-
-(defun smc/gaussian (&optional
-                       (n-particles 1000)
-                       (observations (loop repeat 1000 collect (+ 1d0 (* 2d0 (gaussian-random))))
-                                     #+nil (loop repeat 1000 collect 100d0)))
-  (local
-    ;; Particles are represented as indices into these arrays.
-    (def μ (make-array (list n-particles) :element-type 'double-float))
-    (def σ (make-array (list n-particles) :element-type 'double-float))
-
-    (loop for i below n-particles
-          do (setf (aref μ i) (- 10d0 (random 20d0))
-                   (aref σ i) (random 10d0)))
-
-    (-> log-likelihood (double-float double-float double-float) double-float)
-    (defun log-likelihood (μ σ datum)
-      "Return the log-likelihood of DATUM for given model parameters."
-      (values (if (plusp σ)
-                  (gaussian-log-likelihood μ σ datum)
-                  sb-ext:double-float-negative-infinity)))
-
-    (defun particle-log-likelihood (particle datum)
-      "Return the log-likelihood of DATUM given the parameters of PARTICLE."
-      (log-likelihood (aref μ particle) (aref σ particle) datum))
-
-    (defun respawn! (parent-indices)
-      "Re-initialize the particles by copying values from PARENT-INDICES.
-       (PARENT-INDICES were chosen by resampling.)"
-      (loop with μ₀ = (copy-array μ)
-            with σ₀ = (copy-array σ)
-            for i from 0
-            for p in parent-indices
-            do (setf (aref μ i) (aref μ₀ p)
-                     (aref σ i) (aref σ₀ p))))
-
-    (defun jitter! (metropolis-accept?)
-      "Jitter (rejuvenate) the parameters of all particles using one or more metropolis steps.
-
-       Function (METROPOLIS-ACCEPT? OLD PROPOSED) uses the supplied log-likelihood functions
-       to accept or reject the proposed state."
-      ;; Try a series of moves of different relative sizes.
-      (loop for proposal-stddev in '(0.01d0 0.10d0 0.25d0) do
-        ;; Add gaussian noise to both parameters. Scaled to a fraction of current value.
-        (loop for i below n-particles
-              for μ.i = (aref μ i)
-              for σ.i = (aref σ i)
-              for μ.p = (+ μ.i (* μ.i proposal-stddev (gaussian-random)))
-              for σ.p = (+ σ.i (* σ.i proposal-stddev (gaussian-random)))
-              for old-log-likelihood = (partial #'log-likelihood μ.i σ.i)
-              for new-log-likelihood = (partial #'log-likelihood μ.p σ.p)
-              when (funcall metropolis-accept? old-log-likelihood new-log-likelihood)
-                do (setf (aref μ i) μ.p
-                         (aref σ i) σ.p))))
-    (values μ σ (smc/likelihood-tempering n-particles observations
-                                          :log-likelihood #'particle-log-likelihood
-                                          :respawn! #'respawn!
-                                          :jitter! #'jitter!))))
-
-(defun smc/line (&optional
-                   (n-particles 1000)
-                   (observations (loop for i from 1 below 1000
-                                       collect (list i i))))
-  (local
-    ;; y = m*x + c + N(0,σ)
-    (def m (make-array (list n-particles))) ; m = gradient
-    (def c (make-array (list n-particles))) ; c = intercept
-    (def σ (make-array (list n-particles))) ; σ = stddev of ϵ i.e. gaussian noise
-
-    (loop for i below n-particles
-          do (setf (aref m i) (gaussian-random)
-                   (aref c i) (gaussian-random)
-                   (aref σ i) (abs (gaussian-random))))
-
-    (-> log-likelihood (double-float double-float double-float list) double-float)
-    (defun log-likelihood (m c σ datum)
-      (destructuring-bind (x y) datum
-        (values (if (plusp σ)
-                    (gaussian-log-likelihood (+ (* m x) c) σ y)
-                    sb-ext:double-float-negative-infinity))))
-    (defun particle-log-likelihood (i datum)
-      (log-likelihood (aref m i) (aref c i) (aref σ i) datum))
-    (defun respawn! (parent-indices)
-      (loop with m₀ = (copy-array m)
-            with c₀ = (copy-array c)
-            with σ₀ = (copy-array σ)
-            for i from 0
-            for p in parent-indices
-            do (setf (aref m i) (aref m₀ p)
-                     (aref c i) (aref c₀ p)
-                     (aref σ i) (aref σ₀ p))))
-    (defun jitter! (metropolis-accept?)
-      (loop for proposal-stddev in '(0.01d0 0.10d0 0.25d0) do
-        (loop for i below n-particles
-              for m.i = (aref m i)
-              for c.i = (aref c i)
-              for σ.i = (aref σ i)
-              for m.p = (+ m.i (* proposal-stddev (gaussian-random)))
-              for c.p = (+ c.i (* proposal-stddev (gaussian-random)))
-              for σ.p = (+ σ.i (* proposal-stddev (gaussian-random)))
-              for old-log-likelihood = (partial #'log-likelihood m.i c.i σ.i)
-              for new-log-likelihood = (partial #'log-likelihood m.p c.p σ.p)
-              when (funcall metropolis-accept? old-log-likelihood new-log-likelihood)
-                do (setf (aref m i) m.p
-                         (aref c i) c.p
-                         (aref σ i) σ.p))))
-    (values m c σ (smc/likelihood-tempering n-particles observations
-                                            :log-likelihood #'particle-log-likelihood
-                                            :respawn! #'respawn!
-                                            :jitter! #'jitter!))))
 
 
 ;;;; Sequential Monte Carlo (Particle Filter) sampler
