@@ -1,8 +1,6 @@
 (defpackage #:permo (:use #:gt))
 (in-package #:permo)
 
-(declaim (optimize (speed 1) (debug 3)))
-
 ;;;; Types
 
 ;; Short-hand types.
@@ -12,6 +10,9 @@
 (deftype R** ()           "Vector of real vectors." '(simple-array R* (*)))
 (deftype P   ()           "Probability."            '(R 0d0 1d0))
 (deftype L   ()           "Log-likelihood."         '(R * #.(log 1)))
+
+(-> R (number) R)
+(defsubst R (x) (coerce x 'R))
 
 
 ;;;; DEFMODEL: Model definition DSL (WIP)
@@ -44,8 +45,10 @@
                          for (min max) in ranges
                          collect `(,name (init-parameter-vector n-particles ,min ,max))))
              (labels ((log-likelihood (,@params ,@args)
+                        (declare (type R ,@params ,@args))
                         ,@log-likelihood)
                       (particle-log-likelihood (i ,@args)
+                        (declare (type R ,@args))
                         (log-likelihood ,@(loop for vector in vector.names
                                                 collect `(aref ,vector i))
                                         ,@args))
@@ -67,7 +70,6 @@
                                   do (setf ,@(loop for vector in vector.names
                                                    for proposal in proposal.names
                                                    append `((aref ,vector i) ,proposal)))))))
-               #+debug (declare (inline (smc/likelihood-tempering)))
                (values
                 (smc/likelihood-tempering n-particles observations
                                           :log-likelihood #'particle-log-likelihood
@@ -101,6 +103,7 @@
   "Linear relationship between X and Y with Gaussian noise of constant scale:
      y ~ m*x + c + N(0,σ)
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
+  (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood (+ c (* m x)) σ y))
 
 (defmodel gaussian (x &param
@@ -109,6 +112,7 @@
   "Gaussian distribution:
      x ~ N(μ,σ)
    Infers mean and standard deviation."
+  (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood μ σ x))
 
 (defmodel pi-circle (&param (x -1d0 1d0) (y -1d0 1d0))
@@ -117,7 +121,7 @@
   ;;      zero as the number of likelihood tempering steps increases.
   ;;      Why?
   (log (if (< (sqrt (+ (* x x) (* y y))) 1d0)
-           4d0
+           1d0
            0.001d0)))
 
 
@@ -139,7 +143,7 @@
    (STEP!) ⇒ boolean
      Advance the simulation. Return true on success, false on a completed simulation."
   (loop do (funcall weight!)
-        sum (funcall log-mean-likelihood)
+        sum (funcall log-mean-likelihood) of-type R
         while (funcall step!)
         do (funcall resample!)
            (funcall rejuvenate!)))
@@ -164,16 +168,20 @@
     (def prev-temp temp)
     (def log-weights (make-array (list n-particles) :element-type 'double-float))
 
+    (-> tempered-log-likelihood (t) R)
     (defun tempered-log-likelihood (log-likelihood-fn &optional (temp temp))
       "Return the log-likelihood tempered with the current temperature."
+      (declare (type (function (R R) R) log-likelihood-fn))
       (handler-case
           (loop for o in (or observations (list '()))
-                summing (apply log-likelihood-fn o) into ll
+                summing (apply log-likelihood-fn o) into ll of-type R
                 finally (return (logexpt ll temp)))
         (floating-point-overflow () sb-ext:double-float-negative-infinity)))
+    (-> log-mean-likelihood () R)
     (defun log-mean-likelihood ()
       "Return the log mean likelihood of all particles."
-      (log/ (logsumexp log-weights) (log n-particles)))
+      (log/ (R (logsumexp log-weights))
+            (R (log n-particles))))
     (defun weight! ()
       "Calculate and set the weight of each particle."
       (loop for i below n-particles
@@ -196,6 +204,7 @@
     (defun rejuvenate! ()
       (funcall jitter! #'metropolis-accept?))
 
+    #+nil (declaim (inline smc))
     (smc :log-mean-likelihood #'log-mean-likelihood
          :resample! #'resample!
          :rejuvenate! #'rejuvenate!
@@ -204,32 +213,33 @@
 
 ;; Helpers for arithmetic in the log domain.
 ;; Used sparingly when it helps to clarify intent.
-(defun log/ (&rest numbers) (apply #'- numbers))
+(-> log/ (r r) r)
+(defun log/ (a b) (- a b))
 ;;(defun log* (&rest numbers) (apply #'+ numbers))
+(-> logexpt (r r) r)
 (defun logexpt (a b)
   "Raise A (a log-domain number) to the power B (which is not log!)"
   (* a b))
 
 ;;;; Systematic resampling
 
-(-> systematic-resample (vector) list)
+(-> systematic-resample (r*) list)
 (defun systematic-resample (log-weights)
   (values
    (systematic-resample/normalized (loop with normalizer = (logsumexp log-weights)
                                          for lw across log-weights
                                          collect (exp (- lw normalizer))))))
 
-(-> systematic-resample/normalized (list) list)
 (defun systematic-resample/normalized (weights)
   (loop with n = (length weights)
         with cdf = (coerce (loop for weight in weights
                                  sum weight into cumulative
                                  collect cumulative)
-                           'vector)
+                           'R*)
         with index = 0
         repeat n
         ;; Pick a starting offset into the CDF
-        for u = (random (/ 1d0 n)) then (+ u (/ 1d0 n))
+        for u of-type R = (random (/ 1d0 n)) then (+ u (/ 1d0 n))
         ;; Step forward through the CDF
         do (loop while (and (> u (aref cdf (min index (1- n))))) do (incf index))
            (minf index (1- n))
@@ -237,6 +247,7 @@
 
 ;;;; Probability distributions and utilities
 
+(-> gaussian-log-likelihood (r r r) r)
 (defun gaussian-log-likelihood (μ σ x)
   "Return the likelihood of Normal(μ,σ) at X."
   (if (plusp σ)
@@ -250,9 +261,9 @@
 (defun logsumexp (vec)
   ;; utility for numerically stable addition of log quantities e.g. for normalization
   ;; see e.g. https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
-  (let ((max (reduce #'max vec)))
+  (let ((max (the R (reduce #'max vec))))
     (if (sb-ext:float-infinity-p max)
         sb-ext:double-float-negative-infinity
         (loop for x across vec
-              summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc
-              finally (return (+ max (log acc)))))))
+              summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc of-type R
+              finally (return (the r (+ max (log acc))))))))
