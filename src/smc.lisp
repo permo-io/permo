@@ -11,8 +11,23 @@
 (deftype P   ()           "Probability."            '(R 0d0 1d0))
 (deftype L   ()           "Log-likelihood."         '(R * #.(log 1)))
 
+(def ⊥ most-negative-double-float
+  "Log-probability of an impossible event. (exp ⊥) => 0d0.")
+
+(declaim (inline smc smc/likelihood-tempering))
+
 (-> R (number) R)
 (defsubst R (x) (coerce x 'R))
+
+(-> gaussian-log-likelihood (r r r) r)
+(defsubst gaussian-log-likelihood (μ σ x)
+  "Return the likelihood of Normal(μ,σ) at X."
+  (if (plusp σ)
+      (let ((z (/ (- x μ) σ)))
+        (- 0
+           (log σ)
+           (/ (+ (* z z) (log (* pi 2))) 2)))
+      most-negative-double-float))
 
 
 ;;;; DEFMODEL: Model definition DSL (WIP)
@@ -83,9 +98,12 @@
                                          )))))))
 
 (defun init-parameter-vector (length min max)
+  "Initialize 'prior' values using uniform random sampling."
+  ;; XXX Implement low-discrepancy sequences for Quasi-Monte Carlo.
   (loop with vec = (make-array (list length) :element-type 'R)
         for i below length
-        do (setf (aref vec i) (lerp (/ i length) min max))
+        do (setf (aref vec i)
+                 (+ min (random (- max min))))
         finally (return vec)))
 
 (defun reorder! (indices &rest arrays)
@@ -115,19 +133,19 @@
   (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood μ σ x))
 
-(defmodel pi-circle (&param (x -1d0 1d0) (y -1d0 1d0))
-  "Estimate Pi via marginal likelihood."
-  ;; XXX: This model starts with a reasonable estimate which then approaches
-  ;;      zero as the number of likelihood tempering steps increases.
-  ;;      Why?
-  (log (if (< (sqrt (+ (* x x) (* y y))) 1d0)
-           1d0
-           0.001d0)))
+(defmodel pi-circle (&param (x -0.5d0 0.5d0) (y -0.5d0 0.5d0))
+  "Marginal-likelihood should be pi.
+   The log-marginal-likelihood should therefore be log pi (~1.145)."
+  (if (and (<= -0.5d0 x 0.5d0)
+           (<= -0.5d0 y 0.5d0)
+           (< (sqrt (+ (* x x) (* y y))) 0.5d0))
+      (log 4d0)
+      ⊥))
 
 
 ;;;; Sequential Monte Carlo (Particle Filter) sampler
 
-(defun smc (&key log-mean-likelihood resample! rejuvenate! step! weight!)
+(defun smc (&key log-mean-likelihood resample? resample! rejuvenate! step! weight!)
   "Run a callback-driven Sequential Monte Carlo particle filter simulation.
    Return the log marginal likelihood estimate.
 
@@ -145,7 +163,8 @@
   (loop do (funcall weight!)
         sum (funcall log-mean-likelihood) of-type R
         while (funcall step!)
-        do (funcall resample!)
+        do (when (funcall resample?)
+             (funcall resample!))
            (funcall rejuvenate!)))
 
 (defun smc/likelihood-tempering (n-particles observations
@@ -166,7 +185,8 @@
   (local
     (def temp 0d0)
     (def prev-temp temp)
-    (def log-weights (make-array (list n-particles) :element-type 'double-float))
+    (def log-weights        (make-array (list n-particles) :element-type 'R :initial-element 0d0))
+    (def normalized-weights (make-array (list n-particles) :element-type 'R :initial-element 1d0))
 
     (-> tempered-log-likelihood (t) R)
     (defun tempered-log-likelihood (log-likelihood-fn &optional (temp temp))
@@ -180,36 +200,50 @@
     (-> log-mean-likelihood () R)
     (defun log-mean-likelihood ()
       "Return the log mean likelihood of all particles."
-      (log/ (R (logsumexp log-weights))
-            (R (log n-particles))))
+      (log/ (logsumexp log-weights) (coerce (log n-particles) 'R)))
     (defun weight! ()
       "Calculate and set the weight of each particle."
       (loop for i below n-particles
-            do (let (#+nil (old (aref log-weights i)))
-                 (setf (aref log-weights i)
-                       (lret ((r (log/ (tempered-log-likelihood (partial log-likelihood i))
-                                       (tempered-log-likelihood (partial log-likelihood i) prev-temp)))
-                             #+nil (format t "~&r = ~8f~%" r)))))))
+            do (setf (aref log-weights i)
+                     (log/ (tempered-log-likelihood (partial log-likelihood i))
+                           (tempered-log-likelihood (partial log-likelihood i) prev-temp))))
+      (loop with normalizer = (logsumexp log-weights)
+            for i below n-particles
+            for lw across log-weights
+            do (setf (aref normalized-weights i) (exp (- lw normalizer)))))
+    (defun resample? ()
+      (adaptive-resample/ess? normalized-weights))
     (defun resample! ()
       "Replace old particles by resampling them into new ones."
-      (funcall respawn! (systematic-resample log-weights)))
+      (funcall respawn! (systematic-resample normalized-weights)))
     (defun step! ()
       "Advance the tempering schedule (unless finished.)"
-      (setf prev-temp temp)
-      (and (< temp 1d0)
-           (setf temp (min 1d0 (+ temp temp-step)))))
+      (if (= temp 1d0)
+          nil
+          (progn (setf prev-temp temp)
+                 (setf temp (min 1d0 (+ temp temp-step))))))
     (defun metropolis-accept? (old-log-likelihood new-log-likelihood)
       (< (log (random 1d0)) (log/ (tempered-log-likelihood new-log-likelihood)
                                   (tempered-log-likelihood old-log-likelihood))))
     (defun rejuvenate! ()
       (funcall jitter! #'metropolis-accept?))
 
-    #+nil (declaim (inline smc))
     (smc :log-mean-likelihood #'log-mean-likelihood
+         ;; XXX Have to resample ATM - have a bug in weight calculations when inhibited...
+         :resample? (constantly t) #+nil #'resample?
          :resample! #'resample!
          :rejuvenate! #'rejuvenate!
          :step! #'step!
          :weight! #'weight!)))
+
+(defun adaptive-resample/ess? (normalized-weights &optional (threshold 0.7d0))
+  "Does the Effective Sample Size justify resampling? (Adaptive Resampling.)"
+  (< (effective-sample-size normalized-weights) (* (length normalized-weights) threshold)))
+
+(-> effective-sample-size (R*) R)
+(defun effective-sample-size (normalized-weights)
+  "Return the Effective Sample Size."
+  (/ 1 (loop for w across normalized-weights summing (expt w 2))))
 
 ;; Helpers for arithmetic in the log domain.
 ;; Used sparingly when it helps to clarify intent.
@@ -224,15 +258,10 @@
 ;;;; Systematic resampling
 
 (-> systematic-resample (r*) list)
-(defun systematic-resample (log-weights)
-  (values
-   (systematic-resample/normalized (loop with normalizer = (logsumexp log-weights)
-                                         for lw across log-weights
-                                         collect (exp (- lw normalizer))))))
-
-(defun systematic-resample/normalized (weights)
-  (loop with n = (length weights)
-        with cdf = (coerce (loop for weight in weights
+(defun systematic-resample (normalized-weights)
+  "Return parent indices based on Systematic Resampling."
+  (loop with n = (length normalized-weights)
+        with cdf = (coerce (loop for weight across normalized-weights
                                  sum weight into cumulative
                                  collect cumulative)
                            'R*)
@@ -245,17 +274,7 @@
            (minf index (1- n))
         collect (min index (1- n))))
 
-;;;; Probability distributions and utilities
-
-(-> gaussian-log-likelihood (r r r) r)
-(defun gaussian-log-likelihood (μ σ x)
-  "Return the likelihood of Normal(μ,σ) at X."
-  (if (plusp σ)
-      (let ((z (/ (- x μ) σ)))
-        (- 0
-           (log σ)
-           (/ (+ (* z z) (log (* pi 2))) 2)))
-      most-negative-double-float))
+;;;; Utilities
 
 (-> logsumexp (R*) R)
 (defun logsumexp (vec)
@@ -266,4 +285,4 @@
         sb-ext:double-float-negative-infinity
         (loop for x across vec
               summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc of-type R
-              finally (return (the r (+ max (log acc))))))))
+              finally (return (the R (+ max (log acc))))))))
