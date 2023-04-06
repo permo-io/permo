@@ -1,3 +1,4 @@
 (asdf:defsystem "permo"
   :depends-on (#:gt)
-  :components ((:file "smc")))
+  :components ((:file "smc")
+               (:file "benchmark")))

@@ -34,6 +34,16 @@
         # build the 'permo' executable lisp core
         packages.default = core;
         apps.default = { type = "app"; program = "${core}/bin/permo"; };
+        apps.benchmark-pi-circle = {
+          type = "app";
+          program = (let script = pkgs.writeScript "pi-circle" ''
+                                    ${pkgs.linuxPackages.perf}/bin/perf stat -x \; \
+                                    ${core}/bin/permo --script <<EOF
+                                    (benchmark:pi-circle)
+                                    EOF
+                                  ''; in
+                       "${script}");
+        };
       }
     );
 }
