@@ -39,7 +39,8 @@
           program = (let script = pkgs.writeScript "pi-circle" ''
                                     ${pkgs.linuxPackages.perf}/bin/perf stat -x \; \
                                     ${core}/bin/permo --script <<EOF
-                                    (benchmark:pi-circle)
+                                    (setf *random-state* (make-random-state t))
+                                    (time (benchmark:pi-circle))
                                     EOF
                                   ''; in
                        "${script}");
