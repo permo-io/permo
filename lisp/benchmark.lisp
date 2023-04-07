@@ -5,8 +5,8 @@
 (in-package #:benchmark)
 
 (defun pi-circle (&optional
-                    (n-particles (random-in-range 1 (1+ 10000)))
-                    (steps (random-in-range 1 (1+ 1000))))
+                    (n-particles (random-in-range 1 (1+ 100000)))
+                    (steps (random-in-range 1 (1+ 10000))))
   (format t "~%~S ;; host ~a~%"
           (list :n-particles n-particles
                 :steps steps
