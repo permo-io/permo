@@ -11,7 +11,7 @@
 
 {
   description = "Permo: performance testing robot";
-  inputs.nixpkgs.url = "nixpkgs";
+  inputs.nixpkgs.url = "github:lukego/nixpkgs/cl-duckdb";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
@@ -29,7 +29,9 @@
         dev = sbcl0.withPackages (ps: import nix/lisp-deps.nix ps);
         # executable sbcl core with permo loaded
         core = import ./nix/permo-core.nix { inherit sbcl;
-                                               inherit (pkgs) runCommand; };
+                                             inherit (pkgs) lib patchelf runCommand;
+                                             lispLibs = dev.lispLibs;
+                                           };
       in {
         # build the 'permo' executable lisp core
         packages.default = core;

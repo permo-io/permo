@@ -4,6 +4,8 @@ lispPackages:
 with lispPackages; [
   # core
   alexandria serapeum gt
+  parachute
+  duckdb
   # handy
   cl-ppcre cl-interpol cffi
   sqlite cl-dbi dbd-sqlite3 dbd-postgres sxql

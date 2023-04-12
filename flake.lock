@@ -17,16 +17,18 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1680577567,
-        "narHash": "sha256-Y4W57i0TzczqwMTjfVSbAZT5RJx7u+mpQIW/ofrkTQs=",
-        "owner": "NixOS",
+        "lastModified": 1681293974,
+        "narHash": "sha256-nc1vgBhiEhh3P6z+KOB65sciRFJ5kMsSLeju/b10gxs=",
+        "owner": "lukego",
         "repo": "nixpkgs",
-        "rev": "b01f185e4866de7c5b5a82f833ca9ea3c3f72fc4",
+        "rev": "9063e1b268ed88986e3de883ad17aa0a2401d4db",
         "type": "github"
       },
       "original": {
-        "id": "nixpkgs",
-        "type": "indirect"
+        "owner": "lukego",
+        "ref": "cl-duckdb",
+        "repo": "nixpkgs",
+        "type": "github"
       }
     },
     "root": {
