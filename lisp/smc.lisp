@@ -24,7 +24,7 @@
   "Return the likelihood of Normal(μ,σ) at X."
   (if (plusp σ)
       (let ((z (/ (- x μ) σ)))
-        (- 0
+        (- 0d0
            (log σ)
            (/ (+ (* z z) (log (* pi 2))) 2)))
       most-negative-double-float))
@@ -123,6 +123,30 @@
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
   (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood (+ c (* m x)) σ y))
+
+;;; Posterior predictive checks
+;;; XXX where does this code really belong?
+(defun posterior-predictive-bitmap (xs ys m c σ)
+  (lret ((image (make-array (list (length xs) (length ys)) :element-type 'r)))
+    (loop   for i from 0 for x in xs do
+      (loop for j from 0 for y in ys do
+        (setf (aref image i j)
+              (gaussian-log-likelihood (+ c (* m x)) σ y))))))
+
+(defun draw-posterior-bitmap (bitmap)
+  (loop for y from 0 below (array-dimension bitmap 1) do
+    (loop for x downfrom (1- (array-dimension bitmap 0)) to 0
+          for l = (aref bitmap x y)
+          do (princ (elt "█▓▒░ " (min 4 (max 0 (floor (log (abs l)))))))
+          )
+          (terpri))
+  )
+
+;;(defun posterior-predictive-composite (xs ys lines)
+;;(loop for m across (@ dict 'm)
+;;      for c across (@ dict 'c)
+;;      for σ across (@ dict 'σ)
+;;  )
 
 (defmodel gaussian (x &param
                       (μ -10d0 10d0)
