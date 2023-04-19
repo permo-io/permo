@@ -6,6 +6,7 @@
   (:export #:load-csv
            #:categorical-groups))
 (in-package #:permo/stm)
+(named-readtables:in-readtable :interpol-syntax)
 
 ;;;; State
 
