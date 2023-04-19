@@ -9,7 +9,8 @@
 (deftype R*  ()           "Real vector."            '(simple-array R  (*)))
 (deftype R** ()           "Vector of real vectors." '(simple-array R* (*)))
 (deftype P   ()           "Probability."            '(R 0d0 1d0))
-(deftype L   ()           "Log-likelihood."         '(R * #.(log 1)))
+(deftype L   ()           "Log-likelihood."         '(R * #.(coerce (log 1) 'double-float)))
+(deftype pdf ()           "Prob. density function." '(function (&rest R) L))
 
 (def ⊥ most-negative-double-float
   "Log-probability of an impossible event. (exp ⊥) => 0d0.")
@@ -18,6 +19,9 @@
 
 (-> R (number) R)
 (defsubst R (x) (coerce x 'R))
+
+(-> R* (&rest R) R*)
+(defsubst R* (&rest xs) (coerce xs 'R*))
 
 (-> gaussian-log-likelihood (r r r) r)
 (defsubst gaussian-log-likelihood (μ σ x)
@@ -123,6 +127,21 @@
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
   (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood (+ c (* m x)) σ y))
+
+
+(-> line/pdf (R R R) pdf)
+(defun line/pdf (m c σ)
+  (lambda (x y)
+    (gaussian-log-likelihood (+ c (* m x)) σ y)))
+
+(-> uniform-mixture/pdf (&rest pdf) pdf)
+(defun uniform-mixture/pdf (&rest pdfs)
+  (let ((log-normalizer (log (R (length pdfs)))))
+    (lambda (&rest values)
+      (loop for pdf in pdfs
+            collecting (apply pdf values) into acc
+            finally (return (log/ (logsumexp (coerce acc 'R*))
+                                  log-normalizer))))))
 
 ;;; Posterior predictive checks
 ;;; XXX where does this code really belong?
