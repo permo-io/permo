@@ -11,7 +11,7 @@
 
 {
   description = "Permo: performance testing robot";
-  inputs.nixpkgs.url = "github:lukego/nixpkgs/cl-duckdb";
+  inputs.nixpkgs.url = "nixpkgs/master";
   inputs.flake-utils.url = "github:numtide/flake-utils";
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
@@ -32,10 +32,19 @@
                                              inherit (pkgs) lib patchelf runCommand;
                                              lispLibs = dev.lispLibs;
                                            };
+        #
+        # R
+        #
+        rEnv = pkgs.rWrapper.override {
+          packages = with pkgs.rPackages; [
+            tidyverse ggplot2 duckdb arrow
+          ];
+        };
       in {
         # build the 'permo' executable lisp core
         packages.default = core;
         apps.default = { type = "app"; program = "${core}/bin/permo"; };
+        apps.R       = { type = "app"; program = "${rEnv}/bin/R"; };
         apps.benchmark-pi-circle = {
           type = "app";
           program = (let script = pkgs.writeScript "pi-circle" ''

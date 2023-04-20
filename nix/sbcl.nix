@@ -10,7 +10,7 @@ let
   ];
   sbcl' = sbcl.overrideAttrs (oa:
     {
-      patches = oa.patches ++ patches;
+      patches = (oa.patches or []) ++ patches;
       version = "${oa.version}-permo";
     });
 in
