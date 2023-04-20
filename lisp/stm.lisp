@@ -92,3 +92,21 @@
                                           collect (list (permo::r x) (permo::r y))
                                                         (coerce obs0 'double-float))
                                     :n-particles 1000 :steps 1000)))))
+
+;;;; Export data for diagnostics (etc)
+
+(defun dump-array (filename columns array &key (table-name "data"))
+  (assert (= (length columns) (1+ (array-rank array))))
+  (ddb:with-open-database (db)
+    (ddb:with-open-connection (duckdb:*connection* db)
+      (query (dump-array/create-table table-name columns))
+      (ddb:with-appender (appender table-name)
+        (loop for index from 0
+              while (< index (apply #'* (array-dimensions array)))
+              do (ddb:append-row appender
+                                 (append (mapcar #'permo::R (array-index-row-major array index))
+                                         (list (row-major-aref array index))))))
+      (query #?"COPY ${table-name} TO '${filename}'"))))
+
+(defun dump-array/create-table (table-name columns)
+  (format nil #?"CREATE OR REPLACE TABLE ${table-name} (~{~a DOUBLE~^, ~})" columns))
