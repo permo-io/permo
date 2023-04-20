@@ -9,7 +9,7 @@
 (deftype R*  ()           "Real vector."            '(simple-array R  (*)))
 (deftype R** ()           "Vector of real vectors." '(simple-array R* (*)))
 (deftype P   ()           "Probability."            '(R 0d0 1d0))
-(deftype L   ()           "Log-likelihood."         '(R * #.(coerce (log 1) 'double-float)))
+(deftype L   ()           "Log-likelihood."         'R)
 (deftype pdf ()           "Prob. density function." '(function (&rest R) L))
 
 (def ⊥ most-negative-double-float
@@ -142,6 +142,22 @@
             collecting (apply pdf values) into acc
             finally (return (log/ (logsumexp (coerce acc 'R*))
                                   log-normalizer))))))
+
+(defun discretize-1d (pdf min max steps)
+  (lret ((array (make-array (list steps) :element-type 'L)))
+    (loop for step below steps
+          for x = (lerp (/ step (1- steps)) min max)
+          do (setf (aref array step)
+                   (funcall pdf x)))))
+
+(defun discretize-2d (pdf a.min a.max a.steps b.min b.max b.steps)
+  (lret ((array (make-array (list a.steps b.steps))))
+    (loop for a.step below a.steps
+          for a = (lerp (/ a.step (1- a.steps)) a.min a.max)
+          do (loop for b.step below b.steps
+                   for b = (lerp (/ b.step (1- b.steps)) b.min b.max)
+                   do (setf (aref array a.step b.step)
+                            (funcall pdf a b))))))
 
 ;;; Posterior predictive checks
 ;;; XXX where does this code really belong?
