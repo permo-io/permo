@@ -1,0 +1,65 @@
+#+title: Simple Inference
+
+#+begin_src lisp :session
+(in-package :permo-user)
+;; y = 0.5 * x + e
+;; e ~ N(μ=0, σ=0.1)
+(defparameter *observations* (loop with n = 100
+                                   for i from 0 below n
+                                   for x = (lerp (/ i (1- n)) 0d0 10d0)
+                                   for y = (+ (* 0.5d0 x)
+                                              (* x (gaussian-random) 0.2d0))
+                                   collect (list x y)))
+
+;; Linear regression with gaussian noise
+(defparameter *posterior* (nth-value 1 (permo:line *observations* :n-particles 100 :steps 100)))
+
+;; Aggregate probability density function for all lines
+(defparameter *pdf* (stm::line-posterior-pdf *posterior*))
+
+(defparameter *array* (discretize-2d *pdf*
+                                     -1d0 11d0 256
+                                     -1d0 11d0 256))
+
+(dump-array "/tmp/line.csv" '("x" "y" "ll") *array*)
+(stm::dump-csv "/tmp/points.csv" '("x" "y") *observations*)
+
+;; Linear regression with gaussian noise
+(defparameter *lposterior* (nth-value 1 (smc::line/linear-noise *observations* :n-particles 100 :steps 100)))
+
+;; Aggregate probability density function for all lines
+(defparameter *lpdf* (stm::line-posterior-pdf *lposterior*))
+
+(defparameter *larray* (discretize-2d *lpdf*
+                                      -1d0 11d0 256
+                                      -1d0 11d0 256))
+
+(dump-array "/tmp/lline.csv" '("x" "y" "ll") *larray*)
+#+end_src
+
+#+RESULTS:
+: #<HASH-TABLE :TEST EQUAL :COUNT 1 {100AD13183}>
+
+#+begin_src R :session :results graphics file :file line-heatmap.png
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(cowplot)
+dev.off()
+data <- read_csv("/tmp/line.csv")
+ldata <- read_csv("/tmp/lline.csv")
+points <- read_csv("/tmp/points.csv")
+png("line-heatmap.png", width=1280, height=800)
+grid.arrange(
+  ggplot() +
+  geom_tile(data=data, aes(x=x, y=y, fill=exp(ll))) +
+  geom_point(data=points, aes(x=x, y=y), color="white"),
+  ggplot() +
+  geom_tile(data=ldata, aes(x=x, y=y, fill=exp(ll))) +
+  geom_point(data=points, aes(x=x, y=y), color="white"),
+  ncol=2)
+
+#+end_src
+
+#+RESULTS:
+[[file:line-heatmap.png]]
