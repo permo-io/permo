@@ -1,16 +1,16 @@
-(defpackage #:permo (:use #:gt))
-(in-package #:permo)
+(defpackage #:smc
+  (:use #:permo #:permo-lisp))
+(in-package #:smc)
 
 ;;;; Types
 
 ;; Short-hand types.
 ;; Leaky abstractions: no secret what the concrete representations are.
-(deftype R   (&rest args) "Real number."            `(double-float ,@args))
-(deftype R*  ()           "Real vector."            '(simple-array R  (*)))
-(deftype R** ()           "Vector of real vectors." '(simple-array R* (*)))
-(deftype P   ()           "Probability."            '(R 0d0 1d0))
-(deftype L   ()           "Log-likelihood."         'R)
-(deftype pdf ()           "Prob. density function." '(function (&rest R) L))
+(deftype permo:R   (&rest args) "Real number."            `(double-float ,@args))
+(deftype permo:R*  ()           "Real vector."            '(simple-array R  (*)))
+(deftype permo:P   ()           "Probability."            '(R 0d0 1d0))
+(deftype permo:L   ()           "Log-likelihood."         'R)
+(deftype permo:pdf ()           "Prob. density function." '(function (&rest R) L))
 
 (def ⊥ most-negative-double-float
   "Log-probability of an impossible event. (exp ⊥) => 0d0.")
@@ -18,13 +18,13 @@
 (declaim (inline smc smc/likelihood-tempering))
 
 (-> R (number) R)
-(defsubst R (x) (coerce x 'R))
+(defsubst permo:R (x) (coerce x 'R))
 
 (-> R* (&rest R) R*)
-(defsubst R* (&rest xs) (coerce xs 'R*))
+(defsubst permo:R* (&rest xs) (coerce xs 'R*))
 
 (-> gaussian-log-likelihood (r r r) r)
-(defsubst gaussian-log-likelihood (μ σ x)
+(defsubst permo:gaussian-log-likelihood (μ σ x)
   "Return the likelihood of Normal(μ,σ) at X."
   (if (plusp σ)
       (let ((z (/ (- x μ) σ)))
@@ -36,7 +36,7 @@
 
 ;;;; DEFMODEL: Model definition DSL (WIP)
 
-(defmacro defmodel (name arglist &body log-likelihood)
+(defmacro permo:defmodel (name arglist &body log-likelihood)
   (destructuring-bind (args paramspecs) (split-sequence '&param arglist)
     #+nil (when (null args)       (error "DEFMODEL requires at least one argument."))
     (when (null paramspecs) (error "DEFMODEL requires at least one parameter."))
@@ -307,10 +307,10 @@
 ;; Helpers for arithmetic in the log domain.
 ;; Used sparingly when it helps to clarify intent.
 (-> log/ (r r) r)
-(defun log/ (a b) (- a b))
+(defun permo:log/ (a b) (- a b))
 ;;(defun log* (&rest numbers) (apply #'+ numbers))
 (-> logexpt (r r) r)
-(defun logexpt (a b)
+(defun permo:logexpt (a b)
   "Raise A (a log-domain number) to the power B (which is not log!)"
   (* a b))
 
@@ -336,7 +336,7 @@
 ;;;; Utilities
 
 (-> logsumexp (R*) R)
-(defun logsumexp (vec)
+(defun permo:logsumexp (vec)
   ;; utility for numerically stable addition of log quantities e.g. for normalization
   ;; see e.g. https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
   (let ((max (the R (reduce #'max vec))))

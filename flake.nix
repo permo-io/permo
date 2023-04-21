@@ -51,7 +51,7 @@
                                     ${pkgs.linuxPackages.perf}/bin/perf stat -x \; \
                                     ${core}/bin/permo --script <<EOF
                                     (setf *random-state* (make-random-state t))
-                                    (time (benchmark:pi-circle))
+                                    (time (benchmark:benchmark-pi-circle))
                                     EOF
                                   ''; in
                        "${script}");

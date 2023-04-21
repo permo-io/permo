@@ -1,12 +1,12 @@
 (defpackage #:permo/benchmark
   (:nicknames #:benchmark)
-  (:use #:gt)
-  (:export #:pi-circle))
+  (:use #:permo #:permo-lisp)
+  (:export #:benchmark-pi-circle))
 (in-package #:benchmark)
 
-(defun pi-circle (&optional
-                    (n-particles (random-in-range 1 (1+ 100000)))
-                    (steps (random-in-range 1 (1+ 10000))))
+(defun benchmark-pi-circle (&optional
+                              (n-particles (random-in-range 1 (1+ 100000)))
+                              (steps (random-in-range 1 (1+ 10000))))
   (format t "~%~S ;; host ~a~%"
           (list :n-particles n-particles
                 :steps steps

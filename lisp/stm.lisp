@@ -1,6 +1,6 @@
 ;;; stm.lisp -- short-term memory, ephemeral state via in-memory duckdb
 (defpackage #:permo/stm
-  (:use #:gt)
+  (:use #:permo #:permo-lisp)
   (:shadow #:query)
   (:nicknames #:stm)
   (:export #:load-csv
@@ -20,7 +20,7 @@
   (values))
 
 ;;; API
-(defun load-csv (filename)
+(defun permo:load-csv (filename)
   (init)
   (ddb:query #?"CREATE TABLE observation AS SELECT * FROM read_csv_auto('${filename}')" nil))
 
@@ -29,7 +29,7 @@
 (defun query (query &rest parameters)
   (alist-hash-table (ddb:query query parameters) :test 'equal))
 
-(defun schema ()
+(defun permo:schema ()
   (loop with raw = (query #?"SELECT column_name, data_type \
                                FROM information_schema.columns \
                                WHERE table_name == 'observation'")
