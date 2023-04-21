@@ -130,12 +130,24 @@
 
 
 (-> line/pdf (R R R) pdf)
-(defun line/pdf (m c σ)
+(defun permo:line/pdf (m c σ)
   (lambda (x y)
     (gaussian-log-likelihood (+ c (* m x)) σ y)))
 
+(defmodel line/linear-noise (x y &param
+                               (m -10d0 100d0)
+                               (c -10d0 10d0)
+                               (σ #.double-float-epsilon 10d0))
+  (gaussian-log-likelihood (+ c (* m x))
+                           (* x σ) y))
+
+(-> line/linear-noise/pdf (R R R) pdf)
+(defun line/linear-noise/pdf (m c σ)
+  (lambda (x y)
+    (gaussian-log-likelihood (+ c (* m x)) (* x σ) y)))
+
 (-> uniform-mixture/pdf (&rest pdf) pdf)
-(defun uniform-mixture/pdf (&rest pdfs)
+(defun permo:uniform-mixture/pdf (&rest pdfs)
   (let ((log-normalizer (log (R (length pdfs)))))
     (lambda (&rest values)
       (loop for pdf in pdfs
@@ -143,6 +155,7 @@
             finally (return (log/ (logsumexp (coerce acc 'R*))
                                   log-normalizer))))))
 
+#+nil
 (defun discretize-1d (pdf min max steps)
   (lret ((array (make-array (list steps) :element-type 'L)))
     (loop for step below steps
@@ -150,38 +163,15 @@
           do (setf (aref array step)
                    (funcall pdf x)))))
 
-(defun discretize-2d (pdf a.min a.max a.steps b.min b.max b.steps)
-  (lret ((array (make-array (list a.steps b.steps))))
-    (loop for a.step below a.steps
-          for a = (lerp (/ a.step (1- a.steps)) a.min a.max)
-          do (loop for b.step below b.steps
-                   for b = (lerp (/ b.step (1- b.steps)) b.min b.max)
-                   do (setf (aref array a.step b.step)
-                            (funcall pdf a b))))))
-
-;;; Posterior predictive checks
-;;; XXX where does this code really belong?
-(defun posterior-predictive-bitmap (xs ys m c σ)
-  (lret ((image (make-array (list (length xs) (length ys)) :element-type 'r)))
-    (loop   for i from 0 for x in xs do
-      (loop for j from 0 for y in ys do
-        (setf (aref image i j)
-              (gaussian-log-likelihood (+ c (* m x)) σ y))))))
-
-(defun draw-posterior-bitmap (bitmap)
-  (loop for y from 0 below (array-dimension bitmap 1) do
-    (loop for x downfrom (1- (array-dimension bitmap 0)) to 0
-          for l = (aref bitmap x y)
-          do (princ (elt "█▓▒░ " (min 4 (max 0 (floor (log (abs l)))))))
-          )
-          (terpri))
-  )
-
-;;(defun posterior-predictive-composite (xs ys lines)
-;;(loop for m across (@ dict 'm)
-;;      for c across (@ dict 'c)
-;;      for σ across (@ dict 'σ)
-;;  )
+(defun discretize-2d (pdf x.min x.max x.steps y.min y.max y.steps)
+  ;; Table of three-element rows: X, Y, LOGPROB
+  (lret ((array (make-array (list (* x.steps y.steps) 3))))
+    (loop for row from 0 below (array-dimension array 0)
+          for x = (lerp (/ (rem row x.steps)        (1- x.steps)) x.min x.max)
+          for y = (lerp (/ (truncate row x.steps) (1- x.steps)) y.min y.max)
+          do (setf (aref array row 0) x
+                   (aref array row 1) y
+                   (aref array row 2) (funcall pdf x y)))))
 
 (defmodel gaussian (x &param
                       (μ -10d0 10d0)

@@ -37,7 +37,7 @@
         #
         rEnv = pkgs.rWrapper.override {
           packages = with pkgs.rPackages; [
-            tidyverse ggplot2 duckdb arrow
+            tidyverse ggplot2 duckdb arrow cowplot gridExtra
           ];
         };
       in {

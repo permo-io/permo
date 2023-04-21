@@ -95,18 +95,42 @@
 
 ;;;; Export data for diagnostics (etc)
 
+(defun line/linear-posterior-pdf (posterior)
+  (apply #'uniform-mixture/pdf (loop for line in (line-posterior-rows posterior)
+                                     collect (apply #'smc::line/linear-noise/pdf line)))))
+
+(defun line-posterior-pdf (posterior)
+  (apply #'uniform-mixture/pdf (loop for line in (line-posterior-rows posterior)
+                                     collect (apply #'line/pdf line))))
+
+(defun line-posterior-rows (posterior)
+  (let ((m (@ posterior 'smc::m))
+        (c (@ posterior 'smc::c))
+        (σ (@ posterior 'smc::σ)))
+    (loop for i below (length m)
+          collect (list (elt m i) (elt c i) (elt σ i)))))
+
 (defun dump-array (filename columns array &key (table-name "data"))
-  (assert (= (length columns) (1+ (array-rank array))))
+  (assert (= (length columns) (array-dimension array 1)))
   (ddb:with-open-database (db)
     (ddb:with-open-connection (duckdb:*connection* db)
       (query (dump-array/create-table table-name columns))
       (ddb:with-appender (appender table-name)
-        (loop for index from 0
-              while (< index (apply #'* (array-dimensions array)))
+        (loop for row from 0
+              while (< row (array-dimension array 0))
               do (ddb:append-row appender
-                                 (append (mapcar #'permo::R (array-index-row-major array index))
-                                         (list (row-major-aref array index))))))
-      (query #?"COPY ${table-name} TO '${filename}'"))))
+                                 (loop for column from 0 below (array-dimension array 1)
+                                       collect (aref array row column)))))
+      (query #?"COPY ${table-name} TO '${filename}' (HEADER)"))))
 
 (defun dump-array/create-table (table-name columns)
   (format nil #?"CREATE OR REPLACE TABLE ${table-name} (~{~a DOUBLE~^, ~})" columns))
+
+(defun dump-csv (filename columns rows)
+  (ddb:with-open-database (db)
+    (ddb:with-default-connection (db)
+      (query (format nil "CREATE TABLE data (~{~a DOUBLE~^, ~})" columns))
+      (ddb:with-appender (appender "data")
+        (loop for row in rows
+              do (ddb:append-row appender row)))
+      (query #?"COPY data TO '${filename}' (HEADER)"))))
