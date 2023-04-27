@@ -97,7 +97,7 @@
 
 (defun line/linear-posterior-pdf (posterior)
   (apply #'uniform-mixture/pdf (loop for line in (line-posterior-rows posterior)
-                                     collect (apply #'smc::line/linear-noise/pdf line)))))
+                                     collect (apply #'smc::line/linear-noise/pdf line))))
 
 (defun line-posterior-pdf (posterior)
   (apply #'uniform-mixture/pdf (loop for line in (line-posterior-rows posterior)
