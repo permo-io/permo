@@ -125,7 +125,6 @@
   "Linear relationship between X and Y with Gaussian noise of constant scale:
      y ~ m*x + c + N(0,σ)
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
-  (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood (+ c (* m x)) σ y))
 
 
@@ -179,7 +178,6 @@
   "Gaussian distribution:
      x ~ N(μ,σ)
    Infers mean and standard deviation."
-  (declare (inline gaussian-log-likelihood))
   (gaussian-log-likelihood μ σ x))
 
 (defmodel pi-circle (&param (x -0.5d0 0.5d0) (y -0.5d0 0.5d0))
@@ -194,29 +192,7 @@
 
 ;;;; Sequential Monte Carlo (Particle Filter) sampler
 
-(defun smc (&key log-mean-likelihood resample? resample! rejuvenate! step! weight!)
-  "Run a callback-driven Sequential Monte Carlo particle filter simulation.
-   Return the log marginal likelihood estimate.
-
-   Callbacks:
-   (WEIGHT!)
-     Calculate and associate weights with particles.
-   (LOG-MEAN-LIKELIHOOD) ⇒ double-float
-     Return the log mean likelihood for all particles.
-   (RESAMPLE!)
-     Resample weighted particles into equally-weighted replacements.
-   (REJUVENATE!)
-     Jitter particles without changing their distribution.
-   (STEP!) ⇒ boolean
-     Advance the simulation. Return true on success, false on a completed simulation."
-  (loop do (funcall weight!)
-        sum (funcall log-mean-likelihood) of-type R
-        while (funcall step!)
-        do (when (funcall resample?)
-             (funcall resample!))
-           (funcall rejuvenate!)))
-
-(defun smc/likelihood-tempering (n-particles observations
+(defsubst smc/likelihood-tempering (n-particles observations
                                     &key
                                       log-likelihood respawn! jitter!
                                       (temp-step 0.01d0))
@@ -284,6 +260,28 @@
          :rejuvenate! #'rejuvenate!
          :step! #'step!
          :weight! #'weight!)))
+
+(defsubst smc (&key log-mean-likelihood resample? resample! rejuvenate! step! weight!)
+  "Run a callback-driven Sequential Monte Carlo particle filter simulation.
+   Return the log marginal likelihood estimate.
+
+   Callbacks:
+   (WEIGHT!)
+     Calculate and associate weights with particles.
+   (LOG-MEAN-LIKELIHOOD) ⇒ double-float
+     Return the log mean likelihood for all particles.
+   (RESAMPLE!)
+     Resample weighted particles into equally-weighted replacements.
+   (REJUVENATE!)
+     Jitter particles without changing their distribution.
+   (STEP!) ⇒ boolean
+     Advance the simulation. Return true on success, false on a completed simulation."
+  (loop do (funcall weight!)
+        sum (funcall log-mean-likelihood) of-type R
+        while (funcall step!)
+        do (when (funcall resample?)
+             (funcall resample!))
+           (funcall rejuvenate!)))
 
 (defun adaptive-resample/ess? (normalized-weights &optional (threshold 0.7d0))
   "Does the Effective Sample Size justify resampling? (Adaptive Resampling.)"
