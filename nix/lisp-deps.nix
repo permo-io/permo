@@ -6,7 +6,8 @@ with lispPackages; [
   alexandria serapeum gt
   parachute
   duckdb
-  mcclim polyclot
+  # dataviz
+  mcclim polyclot kons-9
   # handy
   cl-ppcre cl-interpol cffi
   sqlite cl-dbi dbd-sqlite3 dbd-postgres sxql
