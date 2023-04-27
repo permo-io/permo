@@ -1,6 +1,10 @@
-#+title: Permo
+[[./permo.svg]]
 
-Hi, I'm Permo the robot! I'm newborn: a robo-baby, really.
+Hi, I'm Permo the robot!
+
+-----
+
+I'm newborn: a robo-baby, really.
 
 When I grow up I want to work as a software performance tester. I'll be great at
 this! Bayesian inference is second nature for me.
