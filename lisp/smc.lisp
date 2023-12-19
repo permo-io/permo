@@ -1,42 +1,17 @@
 (defpackage #:smc
-  (:use #:permo #:permo-lisp))
+  (:use #:permo-lisp #:permo-base))
 (in-package #:smc)
 
 ;;;; Types
 
 ;; Short-hand types.
 ;; Leaky abstractions: no secret what the concrete representations are.
-(deftype permo:R   (&rest args) "Real number."            `(double-float ,@args))
-(deftype permo:R*  ()           "Real vector."            '(simple-array R  (*)))
-(deftype permo:P   ()           "Probability."            '(R 0d0 1d0))
-(deftype permo:L   ()           "Log-likelihood."         'R)
-(deftype permo:pdf ()           "Prob. density function." '(function (&rest R) L))
-
-(def ⊥ most-negative-double-float
-  "Log-probability of an impossible event. (exp ⊥) => 0d0.")
-
 (declaim (inline smc smc/likelihood-tempering))
-
-(-> R (number) R)
-(defsubst permo:R (x) (coerce x 'R))
-
-(-> R* (&rest R) R*)
-(defsubst permo:R* (&rest xs) (coerce xs 'R*))
-
-(-> gaussian-log-likelihood (r r r) r)
-(defsubst permo:gaussian-log-likelihood (μ σ x)
-  "Return the likelihood of Normal(μ,σ) at X."
-  (if (plusp σ)
-      (let ((z (/ (- x μ) σ)))
-        (- 0d0
-           (log σ)
-           (/ (+ (* z z) (log (* pi 2))) 2)))
-      most-negative-double-float))
 
 
 ;;;; DEFMODEL: Model definition DSL (WIP)
 
-(defmacro permo:defmodel (name arglist &body log-likelihood)
+(defmacro defmodel (name arglist &body log-likelihood)
   (destructuring-bind (args paramspecs) (split-sequence '&param arglist)
     #+nil (when (null args)       (error "DEFMODEL requires at least one argument."))
     (when (null paramspecs) (error "DEFMODEL requires at least one parameter."))
@@ -88,7 +63,9 @@
                                 when (funcall metropolis-accept? ll.old ll.new)
                                   do (setf ,@(loop for vector in vector.names
                                                    for proposal in proposal.names
-                                                   append `((aref ,vector i) ,proposal)))))))
+                                                   append `((aref ,vector i) ,proposal)))))
+                        #+nil(smc-trace::smc-pstep (list ,@vector.names))
+                        ))
                (values
                 (smc/likelihood-tempering n-particles observations
                                           :log-likelihood #'particle-log-likelihood
@@ -127,9 +104,8 @@
    Infers parameters M (gradient), C (intercept), and σ (standard deviation.)"
   (gaussian-log-likelihood (+ c (* m x)) σ y))
 
-
 (-> line/pdf (R R R) pdf)
-(defun permo:line/pdf (m c σ)
+(defun line/pdf (m c σ)
   (lambda (x y)
     (gaussian-log-likelihood (+ c (* m x)) σ y)))
 
@@ -146,7 +122,7 @@
     (gaussian-log-likelihood (+ c (* m x)) (* x σ) y)))
 
 (-> uniform-mixture/pdf (&rest pdf) pdf)
-(defun permo:uniform-mixture/pdf (&rest pdfs)
+(defun uniform-mixture/pdf (&rest pdfs)
   (let ((log-normalizer (log (R (length pdfs)))))
     (lambda (&rest values)
       (loop for pdf in pdfs
@@ -220,7 +196,7 @@
       (handler-case
           (loop for o in (or observations (list '()))
                 summing (apply log-likelihood-fn o) into ll of-type R
-                finally (return (logexpt ll temp)))
+                finally (return (logexpt ll (expt temp 3))))
         (floating-point-overflow () sb-ext:double-float-negative-infinity)))
     (-> log-mean-likelihood () R)
     (defun log-mean-likelihood ()
@@ -255,7 +231,7 @@
 
     (smc :log-mean-likelihood #'log-mean-likelihood
          ;; XXX Have to resample ATM - have a bug in weight calculations when inhibited...
-         :resample? (constantly t) #+nil #'resample?
+         :resample? (lambda () t) #+nil #'resample?
          :resample! #'resample!
          :rejuvenate! #'rejuvenate!
          :step! #'step!
@@ -292,16 +268,6 @@
   "Return the Effective Sample Size."
   (/ 1 (loop for w across normalized-weights summing (expt w 2))))
 
-;; Helpers for arithmetic in the log domain.
-;; Used sparingly when it helps to clarify intent.
-(-> log/ (r r) r)
-(defun permo:log/ (a b) (- a b))
-;;(defun log* (&rest numbers) (apply #'+ numbers))
-(-> logexpt (r r) r)
-(defun permo:logexpt (a b)
-  "Raise A (a log-domain number) to the power B (which is not log!)"
-  (* a b))
-
 ;;;; Systematic resampling
 
 (-> systematic-resample (r*) list)
@@ -323,13 +289,3 @@
 
 ;;;; Utilities
 
-(-> logsumexp (R*) R)
-(defun permo:logsumexp (vec)
-  ;; utility for numerically stable addition of log quantities e.g. for normalization
-  ;; see e.g. https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
-  (let ((max (the R (reduce #'max vec))))
-    (if (sb-ext:float-infinity-p max)
-        sb-ext:double-float-negative-infinity
-        (loop for x across vec
-              summing (if (sb-ext:float-infinity-p x) 0d0 (exp (- x max))) into acc of-type R
-              finally (return (the R (+ max (log acc))))))))

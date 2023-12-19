@@ -4,7 +4,7 @@ lispPackages:
 with lispPackages; [
   # core
   alexandria serapeum gt
-  parachute
+  parachute mgl-pax try
   duckdb
   # dataviz
   mcclim polyclot kons-9
@@ -14,4 +14,5 @@ with lispPackages; [
   cl-csv for
   cl-who cl-base64
   adopt adopt-subcommands
+  vellum vellum-csv vellum-postmodern
 ]

@@ -4,7 +4,7 @@
 (in-package :permo-user)
 ;; y = 0.5 * x + e
 ;; e ~ N(μ=0, σ=0.1)
-(defparameter *observations* (loop with n = 100
+(defparameter *observations* (loop with n = 50
                                    for i from 0 below n
                                    for x = (lerp (/ i (1- n)) 0d0 10d0)
                                    for y = (+ (* 0.5d0 x)
@@ -12,7 +12,7 @@
                                    collect (list x y)))
 
 ;; Linear regression with gaussian noise
-(defparameter *posterior* (nth-value 1 (permo:line *observations* :n-particles 100 :steps 100)))
+(defparameter *posterior* (nth-value 1 (permo:line *observations* :n-particles 100 :steps 10)))
 
 ;; Aggregate probability density function for all lines
 (defparameter *pdf* (stm::line-posterior-pdf *posterior*))
@@ -38,7 +38,7 @@
 #+end_src
 
 #+RESULTS:
-: #<HASH-TABLE :TEST EQUAL :COUNT 1 {100AD13183}>
+: #<HASH-TABLE :TEST EQUAL :COUNT 1 {1004C6B183}>
 
 #+begin_src R :session :results graphics file :file line-heatmap.png
 library(tidyverse)

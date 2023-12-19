@@ -11,26 +11,35 @@
 
 {
   description = "Permo: performance testing robot";
-  inputs.nixpkgs.url = "github:lukego/nixpkgs/lisp-kons-9";
+  inputs.nixpkgs.url = "github:lukego/nixpkgs/mgl-pax";
   inputs.flake-utils.url = "github:numtide/flake-utils";
-  outputs = { self, nixpkgs, flake-utils }:
+  inputs.mgl-pax-src.url = "github:melisgl/mgl-pax";
+  inputs.mgl-pax-src.flake = false;
+  outputs = { self, nixpkgs, flake-utils, mgl-pax-src }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         # customized build of sbcl
         sbcl0 = import ./nix/sbcl.nix { inherit (pkgs) wrapLisp sbcl fetchurl; };
+        sbcl1 = sbcl0.withOverrides (self: super: {
+          mgl-pax = super.mgl-pax.overrideLispAttrs(o: {
+            src = mgl-pax-src;
+            version = "trunk";
+            lispLibs = o.lispLibs ++ [ super.trivial-utf-8 ];
+          });
+        });
         # permo lisp package
-        permo = import ./nix/permo.nix { sbcl = sbcl0; };
+        #permo = import ./nix/permo.nix { sbcl = sbcl1; };
         # sbcl with permo available
-        sbcl1 = sbcl0.withOverrides (self: super: { inherit permo; });
+        sbcl2 = sbcl1.withOverrides (self: super: {
+          permo = import ./nix/permo.nix { sbcl = sbcl1; };
+        });
         # sbcl with permo included
-        sbcl = sbcl1.withPackages (ps: [ ps.permo ]);
-        # sbcl with dependencies of permo
-        dev = sbcl0.withPackages (ps: import nix/lisp-deps.nix ps);
+        sbcl = sbcl2.withPackages (ps: [ ps.permo ]);
         # executable sbcl core with permo loaded
         core = import ./nix/permo-core.nix { inherit sbcl;
                                              inherit (pkgs) lib patchelf runCommand;
-                                             lispLibs = dev.lispLibs;
+                                             lispLibs = sbcl.lispLibs;
                                            };
         #
         # R
@@ -40,9 +49,21 @@
             tidyverse ggplot2 duckdb arrow cowplot gridExtra
           ];
         };
+        api-html = pkgs.runCommand "api-html" {} ''
+          set -e
+          mkdir $out
+          ${sbcl}/bin/sbcl --non-interactive \
+                           --quit \
+                           --eval '(require :asdf)' \
+                           --eval '(require :permo)' \
+                           --eval "(pax:update-asdf-system-html-docs permo::@permo :permo :target-dir \"$out/\")"
+          cd $out
+          ln -s permo.html index.html
+        '';
       in {
         # build the 'permo' executable lisp core
         packages.default = core;
+        packages.api-html = api-html;
         apps.default = { type = "app"; program = "${core}/bin/permo"; };
         apps.R       = { type = "app"; program = "${rEnv}/bin/R"; };
         apps.benchmark-pi-circle = {

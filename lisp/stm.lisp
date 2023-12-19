@@ -1,6 +1,6 @@
 ;;; stm.lisp -- short-term memory, ephemeral state via in-memory duckdb
 (defpackage #:permo/stm
-  (:use #:permo #:permo-lisp)
+  (:use #:permo-lisp)
   (:shadow #:query)
   (:nicknames #:stm)
   (:export #:load-csv
@@ -20,7 +20,7 @@
   (values))
 
 ;;; API
-(defun permo:load-csv (filename)
+(defun load-csv (filename)
   (init)
   (ddb:query #?"CREATE TABLE observation AS SELECT * FROM read_csv_auto('${filename}')" nil))
 
@@ -29,7 +29,7 @@
 (defun query (query &rest parameters)
   (alist-hash-table (ddb:query query parameters) :test 'equal))
 
-(defun permo:schema ()
+(defun schema ()
   (loop with raw = (query #?"SELECT column_name, data_type \
                                FROM information_schema.columns \
                                WHERE table_name == 'observation'")
@@ -63,13 +63,14 @@
 
 ;;; SMC inference integration
 
+#|
 (defun test-infer-1 (host variables &key (step 0))
   (loop for v in variables
         collect (cons v
                       (nth-value 0
-                       (permo::gaussian (loop for obs across (@ (observations host step) v)
-                                              collect (list (coerce obs 'double-float)))
-                                        :n-particles 500 :steps 100)))))
+                       (gaussian (loop for obs across (@ (observations host step) v)
+                                       collect (list (coerce obs 'double-float)))
+                                 :n-particles 500 :steps 100)))))
 
 (defun test-infer-2 (host variables &key (step 0))
   (loop for v in variables
@@ -92,6 +93,7 @@
                                           collect (list (permo::r x) (permo::r y))
                                                         (coerce obs0 'double-float))
                                     :n-particles 1000 :steps 1000)))))
+|#
 
 ;;;; Export data for diagnostics (etc)
 

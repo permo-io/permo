@@ -1,6 +1,12 @@
 (asdf:defsystem "permo"
-  :depends-on (#:alexandria #:serapeum #:cl-ppcre #:trivia #:duckdb #:cl-interpol)
+  :depends-on (#:alexandria #:serapeum #:cl-ppcre #:trivia #:duckdb #:cl-interpol #:kons-9 #:mgl-pax)
   :components ((:file "packages")
+               (:file "base")
                (:file "smc")
                (:file "stm")
+               (:file "smc-trace")
+               (:file "distributions")
+               (:file "ppl")
+               (:file "smc2")
+               (:file "permo")
                (:file "benchmark")))

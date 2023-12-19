@@ -5,11 +5,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1681202837,
-        "narHash": "sha256-H+Rh19JDwRtpVPAWp64F+rlEtxUWBAQW28eAi3SRSzg=",
+        "lastModified": 1685518550,
+        "narHash": "sha256-o2d0KcvaXzTrPRIo0kOLV0/QXHhDQ5DTi+OxcjO8xqY=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "cfacdce06f30d2b68473a46042957675eebb3401",
+        "rev": "a1720a10a6cfe8234c0e93907ffe81be440f4cef",
         "type": "github"
       },
       "original": {
@@ -18,18 +18,34 @@
         "type": "github"
       }
     },
+    "mgl-pax-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1685537131,
+        "narHash": "sha256-tGUIpnp6hBf1wEU3f/4wJHYcl7rBIhzEPeIrAXK5Luk=",
+        "owner": "melisgl",
+        "repo": "mgl-pax",
+        "rev": "4e43c8c988d3abf8dd3b0e2f782d2f8ac660a19e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "melisgl",
+        "repo": "mgl-pax",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1682578126,
-        "narHash": "sha256-Fhgjb0qcdEsURRcPAm/lAJJNRcxRNCxOCobJ6kLcOPU=",
+        "lastModified": 1683271513,
+        "narHash": "sha256-CcRoz4FougqSh3wYrHyVeIWhtn1ip+IB1O+qtT7Fn2w=",
         "owner": "lukego",
         "repo": "nixpkgs",
-        "rev": "ae269eca3a6e0203ae3480c4d73fb19392a4fc88",
+        "rev": "9ba325330edbba4826bdcd958d53dd8524b90b8e",
         "type": "github"
       },
       "original": {
         "owner": "lukego",
-        "ref": "lisp-kons-9",
+        "ref": "mgl-pax",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -37,6 +53,7 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "mgl-pax-src": "mgl-pax-src",
         "nixpkgs": "nixpkgs"
       }
     },
